@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -117,3 +118,24 @@ async def test_diagnostics(
     assert "person@example.com" not in serialized
     assert "user-123" not in serialized
     assert "Milk" not in serialized
+
+
+def test_monetary_sensors_have_valid_state_class() -> None:
+    """Test monetary sensors only use state classes HA accepts for them."""
+    monetary = [
+        description
+        for description in SENSOR_DESCRIPTIONS
+        if description.device_class is SensorDeviceClass.MONETARY
+    ]
+
+    assert {description.key for description in monetary} == {
+        "basket_total",
+        "basket_subtotal",
+        "basket_savings",
+        "nectar_savings",
+        "latest_order_total",
+    }
+    assert all(
+        description.state_class in (None, SensorStateClass.TOTAL)
+        for description in monetary
+    )
