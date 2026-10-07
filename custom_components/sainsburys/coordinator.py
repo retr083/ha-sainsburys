@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 
 from aiohttp import ClientError
+from homeassistant.core import callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from pysainsburys.exceptions import AuthError, HttpException
@@ -84,7 +85,7 @@ class SainsburysDataUpdateCoordinator(DataUpdateCoordinator[SainsburysData]):
                 translation_key="update_failed",
             ) from err
 
-        self._async_store_session()
+        self.async_store_session()
         return SainsburysData(
             customer=customer,
             basket=basket,
@@ -93,7 +94,8 @@ class SainsburysDataUpdateCoordinator(DataUpdateCoordinator[SainsburysData]):
             slot_reservation=reservation,
         )
 
-    def _async_store_session(self) -> None:
+    @callback
+    def async_store_session(self) -> None:
         """Persist refreshed authentication state in the config entry."""
         session_data = self.auth.to_dict()
         if session_data == self.config_entry.data.get(CONF_SESSION):
