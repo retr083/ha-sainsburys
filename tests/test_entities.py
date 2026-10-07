@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 from homeassistant.core import HomeAssistant
@@ -117,3 +118,29 @@ async def test_diagnostics(
     assert "person@example.com" not in serialized
     assert "user-123" not in serialized
     assert "Milk" not in serialized
+
+
+async def test_entities_without_active_order(
+    sainsburys_data: SainsburysData,
+) -> None:
+    """Test order entities report no data when there is no active order."""
+    data = replace(
+        sainsburys_data,
+        latest_order=None,
+        latest_order_status=None,
+    )
+    coordinator = _coordinator(data)
+
+    values = {
+        description.key: SainsburysSensor(coordinator, description).native_value
+        for description in SENSOR_DESCRIPTIONS
+    }
+    assert values["latest_order_status"] is None
+    assert values["latest_order_total"] is None
+    assert values["amend_cutoff"] is None
+
+    binary_values = {
+        description.key: SainsburysBinarySensor(coordinator, description).is_on
+        for description in BINARY_SENSOR_DESCRIPTIONS
+    }
+    assert binary_values["order_amendable"] is False

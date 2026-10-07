@@ -212,3 +212,82 @@ async def test_coordinator_errors(
     )
     with pytest.raises(expected):
         await coordinator._async_update_data()
+
+
+ORDER_NOT_FOUND_BODY = (
+    '{"errors":[{"code":"ORDER_NOT_FOUND","detail":"Order cannot be found"}]}'
+)
+
+
+def _coordinator_with_status_error(
+    hass: HomeAssistant,
+    session_data: dict[str, object],
+    sainsburys_data,
+    error: Exception,
+) -> SainsburysDataUpdateCoordinator:
+    """Build a coordinator whose order status request raises an error."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="user-123",
+        data={CONF_EMAIL: "person@example.com", CONF_SESSION: session_data},
+    )
+    entry.add_to_hass(hass)
+    customer = MagicMock()
+    customer.basket.fetch = AsyncMock(return_value=sainsburys_data.basket)
+    customer.orders.fetch = AsyncMock(
+        return_value=MagicMock(orders=[sainsburys_data.latest_order])
+    )
+    customer.orders.latest.status = AsyncMock(side_effect=error)
+    customer.slots.fetch_reservation = AsyncMock(
+        return_value=sainsburys_data.slot_reservation
+    )
+    client = MagicMock()
+    client.get_customer = AsyncMock(return_value=customer)
+    auth = MagicMock()
+    auth.to_dict.return_value = session_data
+    return SainsburysDataUpdateCoordinator(hass, entry, client, auth)
+
+
+async def test_order_not_found_means_no_active_order(
+    hass: HomeAssistant,
+    session_data: dict[str, object],
+    sainsburys_data,
+) -> None:
+    """Test a 404 ORDER_NOT_FOUND status response is not an update failure."""
+    coordinator = _coordinator_with_status_error(
+        hass,
+        session_data,
+        sainsburys_data,
+        UnknownEndpointError(404, ORDER_NOT_FOUND_BODY),
+    )
+
+    result = await coordinator._async_update_data()
+
+    assert result.latest_order_status is None
+    assert result.latest_order is sainsburys_data.latest_order
+    assert result.basket is sainsburys_data.basket
+    assert result.slot_reservation is sainsburys_data.slot_reservation
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        UnknownEndpointError(404, ORDER_NOT_FOUND_BODY.replace("ORDER_NOT", "OTHER")),
+        UnknownEndpointError(404, "not json"),
+        UnknownEndpointError(500, ORDER_NOT_FOUND_BODY),
+        UnknownEndpointError(503, "unavailable"),
+    ],
+)
+async def test_other_order_status_errors_still_fail(
+    hass: HomeAssistant,
+    session_data: dict[str, object],
+    sainsburys_data,
+    error: Exception,
+) -> None:
+    """Test only the specific ORDER_NOT_FOUND 404 is treated as no order."""
+    coordinator = _coordinator_with_status_error(
+        hass, session_data, sainsburys_data, error
+    )
+
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
