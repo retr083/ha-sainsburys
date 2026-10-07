@@ -8,6 +8,7 @@ import voluptuous as vol
 from aiohttp import ClientError, ClientSession, CookieJar
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_EMAIL, CONF_PASSWORD
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.selector import (
     TextSelector,
@@ -65,18 +66,27 @@ class SainsburysConfigFlow(ConfigFlow, domain=DOMAIN):
         self._session: ClientSession | None = None
         self._target_entry: SainsburysConfigEntry | None = None
 
-    async def _async_close_session(self) -> None:
-        """Close a temporary config-flow session."""
-        if self._session is not None and not self._session.closed:
-            await self._session.close()
+    @callback
+    def _async_release_session(self) -> None:
+        """Release the temporary config-flow session."""
+        # Sessions from async_create_clientsession share Home Assistant's
+        # connector, so they must be detached rather than closed.
+        if self._session is not None:
+            self._session.detach()
         self._session = None
+
+    @override
+    @callback
+    def async_remove(self) -> None:
+        """Release the session if the flow is abandoned."""
+        self._async_release_session()
 
     async def _async_login(
         self,
         user_input: Mapping[str, Any],
     ) -> tuple[dict[str, str], ConfigFlowResult | None]:
         """Validate credentials and return errors or an MFA form."""
-        await self._async_close_session()
+        self._async_release_session()
         self._session = async_create_clientsession(
             self.hass,
             cookie_jar=CookieJar(unsafe=True),
@@ -97,14 +107,14 @@ class SainsburysConfigFlow(ConfigFlow, domain=DOMAIN):
                 description_placeholders={"email": self._email},
             )
         except AuthError:
-            await self._async_close_session()
+            self._async_release_session()
             return {"base": "invalid_auth"}, None
         except ClientError, HttpException, TimeoutError:
-            await self._async_close_session()
+            self._async_release_session()
             return {"base": "cannot_connect"}, None
         except Exception:  # noqa: BLE001
             LOGGER.exception("Unexpected exception during Sainsbury's login")
-            await self._async_close_session()
+            self._async_release_session()
             return {"base": "unknown"}, None
 
         return {}, await self._async_create_or_update_entry()
@@ -119,10 +129,10 @@ class SainsburysConfigFlow(ConfigFlow, domain=DOMAIN):
         try:
             customer = await client.get_customer()
         except AuthError:
-            await self._async_close_session()
+            self._async_release_session()
             return self.async_abort(reason="invalid_auth")
         except ClientError, HttpException, TimeoutError:
-            await self._async_close_session()
+            self._async_release_session()
             return self.async_abort(reason="cannot_connect")
 
         await self.async_set_unique_id(customer.user_id)
@@ -130,7 +140,7 @@ class SainsburysConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_EMAIL: self._email,
             CONF_SESSION: self._auth.to_dict(),
         }
-        await self._async_close_session()
+        self._async_release_session()
 
         if self._target_entry is not None:
             self._abort_if_unique_id_mismatch()

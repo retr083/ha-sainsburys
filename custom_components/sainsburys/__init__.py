@@ -46,11 +46,8 @@ async def async_setup_entry(
     client = Sainsburys(auth)
     coordinator = SainsburysDataUpdateCoordinator(hass, entry, client, auth)
 
-    try:
-        await coordinator.async_config_entry_first_refresh()
-    except Exception:
-        await session.close()
-        raise
+    # The session is detached by Home Assistant when setup fails or unloads.
+    await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = SainsburysRuntimeData(client, coordinator, session)
     async_register_llm_api(hass, entry)
@@ -63,7 +60,4 @@ async def async_unload_entry(
     entry: SainsburysConfigEntry,
 ) -> bool:
     """Unload a Sainsbury's config entry."""
-    if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        return False
-    await entry.runtime_data.session.close()
-    return True
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
