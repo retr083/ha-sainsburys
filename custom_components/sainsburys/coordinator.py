@@ -13,6 +13,9 @@ from pysainsburys.exceptions import AuthError, HttpException
 
 from .const import CONF_SESSION, DEFAULT_SCAN_INTERVAL, DOMAIN, LOGGER
 
+HTTP_NOT_FOUND = 404
+ORDER_NOT_FOUND_CODE = "ORDER_NOT_FOUND"
+
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
     from pysainsburys import (
@@ -26,6 +29,13 @@ if TYPE_CHECKING:
     )
 
     from .data import SainsburysConfigEntry
+
+
+def _is_order_not_found(err: HttpException) -> bool:
+    """Return whether the API reported that the account has no active order."""
+    return err.status == HTTP_NOT_FOUND and any(
+        error.get("code") == ORDER_NOT_FOUND_CODE for error in err.errors
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +81,7 @@ class SainsburysDataUpdateCoordinator(DataUpdateCoordinator[SainsburysData]):
             orders = await customer.orders.fetch()
             latest_order = orders.orders[0] if orders.orders else None
             latest_status = (
-                await customer.orders.latest.status() if latest_order else None
+                await self._async_fetch_order_status(customer) if latest_order else None
             )
             reservation = await customer.slots.fetch_reservation()
         except AuthError as err:
@@ -93,6 +103,15 @@ class SainsburysDataUpdateCoordinator(DataUpdateCoordinator[SainsburysData]):
             latest_order_status=latest_status,
             slot_reservation=reservation,
         )
+
+    async def _async_fetch_order_status(self, customer: Customer) -> OrderStatus | None:
+        """Fetch live order status, or None when there is no active order."""
+        try:
+            return await customer.orders.latest.status()
+        except HttpException as err:
+            if not _is_order_not_found(err):
+                raise
+            return None
 
     @callback
     def async_store_session(self) -> None:
