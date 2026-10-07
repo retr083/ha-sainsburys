@@ -14,6 +14,7 @@ from pysainsburys import Customer, MFARequiredError
 from pysainsburys.exceptions import AuthError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.sainsburys.config_flow import SainsburysConfigFlow
 from custom_components.sainsburys.const import CONF_SESSION, DOMAIN
 
 USER_INPUT = {
@@ -58,7 +59,6 @@ async def test_user_flow_success(
     """Test a successful user flow."""
     auth, client = _mock_login(session_data)
     session = MagicMock(closed=False)
-    session.close = AsyncMock()
 
     with (
         patch(
@@ -87,7 +87,8 @@ async def test_user_flow_success(
         CONF_SESSION: session_data,
     }
     assert result["result"].unique_id == "user-123"
-    session.close.assert_awaited_once()
+    session.detach.assert_called_once()
+    session.close.assert_not_called()
 
 
 async def test_mfa_flow(
@@ -98,7 +99,6 @@ async def test_mfa_flow(
     auth, client = _mock_login(session_data)
     auth.login.side_effect = MFARequiredError
     session = MagicMock(closed=False)
-    session.close = AsyncMock()
 
     with (
         patch(
@@ -152,7 +152,6 @@ async def test_mfa_errors(
     auth.login.side_effect = MFARequiredError
     auth.send_mfa_request.side_effect = exception
     session = MagicMock(closed=False)
-    session.close = AsyncMock()
 
     with (
         patch(
@@ -200,7 +199,6 @@ async def test_user_flow_errors(
     auth, client = _mock_login(session_data)
     auth.login.side_effect = exception
     session = MagicMock(closed=False)
-    session.close = AsyncMock()
 
     with (
         patch(
@@ -235,7 +233,6 @@ async def test_duplicate_account(
     entry.add_to_hass(hass)
     auth, client = _mock_login(session_data)
     session = MagicMock(closed=False)
-    session.close = AsyncMock()
 
     with (
         patch(
@@ -278,7 +275,6 @@ async def test_customer_validation_errors(
     auth, client = _mock_login(session_data)
     client.get_customer.side_effect = exception
     session = MagicMock(closed=False)
-    session.close = AsyncMock()
 
     with (
         patch(
@@ -325,7 +321,6 @@ async def test_update_credentials(
     entry.add_to_hass(hass)
     auth, client = _mock_login(session_data)
     session = MagicMock(closed=False)
-    session.close = AsyncMock()
 
     with (
         patch(
@@ -355,3 +350,17 @@ async def test_update_credentials(
     assert result["reason"] in {"reauth_successful", "reconfigure_successful"}
     assert entry.data[CONF_EMAIL] == "person@example.com"
     assert entry.data[CONF_SESSION] == session_data
+
+
+async def test_abandoned_flow_detaches_session(hass: HomeAssistant) -> None:
+    """Test removing a flow detaches its session without closing it."""
+    session = MagicMock(closed=False)
+    flow = SainsburysConfigFlow()
+    flow.hass = hass
+    flow._session = session
+
+    flow.async_remove()
+
+    session.detach.assert_called_once()
+    session.close.assert_not_called()
+    assert flow._session is None

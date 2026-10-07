@@ -31,7 +31,6 @@ async def test_setup_and_unload(
     )
     entry.add_to_hass(hass)
     session = MagicMock(closed=False)
-    session.close = AsyncMock()
     auth = MagicMock()
     client = MagicMock()
 
@@ -68,20 +67,19 @@ async def test_setup_and_unload(
         assert await async_unload_entry(hass, entry)
 
     unload.assert_awaited_once()
-    session.close.assert_awaited_once()
+    session.close.assert_not_called()
 
 
-async def test_setup_closes_session_on_failure(
+async def test_setup_failure_does_not_close_session(
     hass: HomeAssistant,
     session_data: dict[str, object],
 ) -> None:
-    """Test failed setup closes its dedicated session."""
+    """Test failed setup leaves session cleanup to Home Assistant."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_EMAIL: "person@example.com", CONF_SESSION: session_data},
     )
     session = MagicMock(closed=False)
-    session.close = AsyncMock()
 
     with (
         patch(
@@ -99,27 +97,24 @@ async def test_setup_closes_session_on_failure(
     ):
         await async_setup_entry(hass, entry)
 
-    session.close.assert_awaited_once()
+    session.close.assert_not_called()
 
 
-async def test_unload_failure_keeps_session(
+async def test_unload_failure_returns_false(
     hass: HomeAssistant,
     session_data: dict[str, object],
 ) -> None:
-    """Test a failed platform unload leaves runtime resources active."""
+    """Test a failed platform unload is reported."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         data={CONF_EMAIL: "person@example.com", CONF_SESSION: session_data},
     )
-    entry.runtime_data = MagicMock()
-    entry.runtime_data.session.close = AsyncMock()
     with patch.object(
         hass.config_entries,
         "async_unload_platforms",
         AsyncMock(return_value=False),
     ):
         assert not await async_unload_entry(hass, entry)
-    entry.runtime_data.session.close.assert_not_awaited()
 
 
 async def test_coordinator_update(
