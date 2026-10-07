@@ -59,6 +59,8 @@ async def test_setup_and_unload(
     ):
         assert await async_setup_entry(hass, entry)
         assert entry.runtime_data.client is client
+        coordinator = entry.runtime_data.coordinator
+        assert auth.on_session_update == coordinator.async_store_session
         assert entry.runtime_data.session is session
         assert any(
             api.id == llm_api_id(entry.entry_id) for api in llm.async_get_apis(hass)
@@ -174,7 +176,7 @@ async def test_unchanged_session_is_not_written(
     )
 
     with patch.object(hass.config_entries, "async_update_entry") as update_entry:
-        coordinator._async_store_session()
+        coordinator.async_store_session()
 
     update_entry.assert_not_called()
 

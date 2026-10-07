@@ -45,6 +45,8 @@ async def async_setup_entry(
     auth = create_auth(entry.data[CONF_SESSION], session)
     client = Sainsburys(auth)
     coordinator = SainsburysDataUpdateCoordinator(hass, entry, client, auth)
+    # Save rotated tokens as soon as they are issued, even if setup fails later.
+    auth.on_session_update = coordinator.async_store_session
 
     # The session is detached by Home Assistant when setup fails or unloads.
     await coordinator.async_config_entry_first_refresh()
